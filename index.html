@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Apresentação · Painel do Condomínio</title>
+<meta name="referrer" content="no-referrer">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="demo-bar">
+  <p><span class="demo-long">Apresentação ao cliente · Residencial Hortênsias · 24 unidades, um responsável por quarto/kitnet, contrato-modelo para assinar no painel.</span><span class="demo-short">Demonstração · Hortênsias</span></p>
+  <div class="row">
+    <button type="button" data-papel="dono" class="primary" aria-pressed="true"><span class="papel-long">Ver como dono</span><span class="papel-short">Dono</span></button>
+    <button type="button" data-papel="observador" aria-pressed="false"><span class="papel-long">Ver como observador</span><span class="papel-short">Observador</span></button>
+    <button type="button" id="demo-reset"><span class="papel-long">Recarregar dados</span><span class="papel-short">Reset</span></button>
+  </div>
+</div>
+<header class="topbar">
+  <div class="brand"><span class="logo"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 7h2M13 7h2M9 11h2M13 11h2M10 21v-4h4v4"/></svg></span><h1>Painel do Condomínio</h1></div>
+  <nav id="tabs" aria-label="Seções">
+    <button data-tab="financeiro" class="active"><svg class="ic" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg> Financeiro</button>
+    <button data-tab="calendario"><svg class="ic" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="17" rx="3"/><path d="M8 2v4M16 2v4M3 10h18"/></svg> Calendário</button>
+    <button data-tab="pessoas"><svg class="ic" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.6-3.6 3.2-5.5 6.5-5.5s5.9 1.9 6.5 5.5"/><path d="M16 4.7a3.5 3.5 0 010 6.6M18 14.8c2 .6 3.2 2.3 3.5 5.2"/></svg> Pessoas</button>
+    <button data-tab="unidades"><svg class="ic" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 19V5M3 15h18v4M21 15v-3a3 3 0 00-3-3h-7v6"/><circle cx="7" cy="11" r="1.7"/></svg> Unidades</button>
+    <button data-tab="contratos"><svg class="ic" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v5h5M8 13h8M8 17h5"/></svg> Contratos</button>
+  </nav>
+  <div class="tools so-dono">
+    <button id="btn-lock" class="ghost" title="Bloquear painel" hidden>Bloquear</button>
+    <button id="btn-export" class="ghost" title="Backup dos dados"><svg class="ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg> Backup</button>
+    <label class="ghost btn" title="Restaurar a partir de um arquivo"><svg class="ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20V9M7 14l5-5 5 5M5 4h14"/></svg> Restaurar<input type="file" id="file-import" accept="application/json,.json" hidden></label>
+  </div>
+</header>
+<div id="alertas"></div>
+<main>
+  <section id="tab-financeiro" class="tab active">
+    <div class="row between wrap">
+      <h2>Painel financeiro</h2>
+      <div class="row gap">
+        <input type="month" id="fin-mes">
+        <button id="btn-gerar" class="primary so-dono">Gerar cobranças do mês</button>
+        <button id="btn-nova-despesa" class="so-dono">+ Despesa</button>
+      </div>
+    </div>
+    <div id="fin-cards" class="cards"></div>
+    <div class="grid2">
+      <div class="panel"><h3>Recebido x despesas · 6 meses</h3><div id="fin-chart"></div></div>
+      <div class="panel"><h3>Ocupação</h3><div id="fin-ocupacao"></div></div>
+    </div>
+    <div class="panel">
+      <h3>Cobranças do mês</h3>
+      <div class="table-wrap"><table id="tb-cobrancas"></table></div>
+    </div>
+    <div class="panel">
+      <h3>Despesas do mês</h3>
+      <div class="table-wrap"><table id="tb-despesas"></table></div>
+    </div>
+  </section>
+  <section id="tab-calendario" class="tab">
+    <div class="row between wrap">
+      <h2>Calendário</h2>
+      <div class="row gap">
+        <button id="cal-prev">‹</button>
+        <strong id="cal-titulo" class="cal-title"></strong>
+        <button id="cal-next">›</button>
+        <button id="cal-hoje">Hoje</button>
+      </div>
+    </div>
+    <div class="legend">
+      <span><i class="dot entrada"></i> Entrada</span>
+      <span><i class="dot venc"></i> Vencimento</span>
+      <span><i class="dot pago"></i> Pago</span>
+      <span><i class="dot atraso"></i> Atrasado</span>
+      <span><i class="dot visto"></i> Visto/documento vence</span>
+      <span><i class="dot contrato"></i> Contrato vence</span>
+      <span><i class="dot saida"></i> Saída</span>
+    </div>
+    <div class="grid2 cal-layout">
+      <div id="cal-grid" class="cal"></div>
+      <div class="panel"><h3 id="cal-dia-titulo">Selecione um dia</h3><div id="cal-dia"></div></div>
+    </div>
+  </section>
+  <section id="tab-pessoas" class="tab">
+    <div class="row between wrap">
+      <h2>Pessoas</h2>
+      <div class="row gap">
+        <input type="search" id="pes-busca" placeholder="Buscar nome, documento…">
+        <select id="pes-filtro">
+          <option value="">Todos</option>
+          <option value="BR">Nacionais</option>
+          <option value="EX">Estrangeiros</option>
+          <option value="ativo">Moradores ativos</option>
+          <option value="inativo">Ex-moradores</option>
+        </select>
+        <button id="btn-nova-pessoa" class="primary so-dono">+ Cadastrar pessoa</button>
+      </div>
+    </div>
+    <div class="table-wrap"><table id="tb-pessoas"></table></div>
+  </section>
+  <section id="tab-unidades" class="tab">
+    <div class="row between wrap">
+      <h2>Quartos e Kitnets</h2>
+      <div class="row gap">
+        <select id="uni-filtro">
+          <option value="">Todos</option>
+          <option value="kitnet">Kitnets</option>
+          <option value="quarto">Quartos</option>
+          <option value="livre">Livres</option>
+          <option value="ocupado">Ocupados</option>
+        </select>
+        <button id="btn-nova-unidade" class="primary so-dono">+ Nova unidade</button>
+      </div>
+    </div>
+    <div id="uni-lista" class="cards units"></div>
+  </section>
+  <section id="tab-contratos" class="tab">
+    <div class="row between wrap">
+      <h2>Contratos</h2>
+      <p class="k" style="margin:0;max-width:36rem">Um responsável por unidade. O modelo é o mesmo para todos; o inquilino lê e assina no painel. Baixar só se precisar.</p>
+    </div>
+    <div id="ctr-resumo"></div>
+    <div class="panel">
+      <h3>Situação</h3>
+      <div class="table-wrap"><table id="tb-contratos"></table></div>
+    </div>
+  </section>
+</main>
+<dialog id="modal"><form method="dialog" id="modal-form"></form></dialog>
+<dialog id="confirmar"><form method="dialog"><p id="conf-msg"></p>
+  <div class="modal-actions"><button value="no">Cancelar</button><button value="yes" class="primary">Confirmar</button></div></form></dialog>
+<dialog id="previa"><form method="dialog"><h3 id="previa-t"></h3><div id="previa-c"></div>
+  <div class="modal-actions"><button class="primary">Fechar</button></div></form></dialog>
+<div id="toast" popover="manual" role="status"></div>
+<script src="js/demo.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
