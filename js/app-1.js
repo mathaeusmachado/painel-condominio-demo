@@ -9,7 +9,22 @@ const KEY_PREV = KEY + '-prev';
 const KEY_BACKUP = KEY + '-backup-em';
 const KEY_OK = KEY + '-ok';
 const KEY_PAPEL = KEY + '-papel';
-const vazio = () => ({ unidades: [], pessoas: [], cobrancas: [], despesas: [], contratos: [] });
+const REGRAS_PADRAO = `REGRAS DE CONVIVÊNCIA — Residencial Hortênsias
+(texto provisório até o arquivo definitivo do condomínio)
+
+1. Silêncio das 22h às 7h. Música e TV em volume baixo o tempo todo.
+2. Áreas comuns: deixe limpo depois de usar. Não deixe louça, lixo ou roupa.
+3. Visitantes até 22h, com aviso ao responsável da unidade. Pernoite só com autorização do locador.
+4. Proibido fumar em áreas comuns. Drogas ilícitas não são permitidas.
+5. Cada morador cuida da própria unidade, da mobília listada no contrato e do lixo no horário da coleta.
+6. Não fure parede, não pinte e não troque fechadura sem autorização por escrito.
+7. Chaves extras só com o locador. Perda de chave gera reposição por conta do morador.
+8. Contas de uso individual (se houver) vencem junto com o aluguel.
+9. Convivência: respeito a nacionalidade, religião e rotina de trabalho dos demais.
+10. Descumprimento reiterado pode encerrar o contrato, nos termos da lei.
+
+Dúvidas: fale com o responsável do imóvel.`;
+const vazio = () => ({ unidades: [], pessoas: [], cobrancas: [], despesas: [], contratos: [], comissoes: [], config: { comissaoObs: false, regras: REGRAS_PADRAO, regrasArq: '' } });
 const isObs = () => DEMO && (localStorage.getItem(KEY_PAPEL) || 'dono') === 'observador';
 const ISO_D = /^\d{4}-\d{2}-\d{2}$/;
 const ISO_M = /^\d{4}-\d{2}$/;
@@ -46,7 +61,7 @@ function limparUnidade(u) {
   if (!u || typeof u !== 'object') return null;
   const id = safeId(u.id); if (!id) return null;
   const itens = arr(u.itens).map(i => i && i.nome ? { nome: str(i.nome, 80), qtd: Math.max(1, num(i.qtd) || 1), estado: str(i.estado, 20) } : null).filter(Boolean);
-  return { id, tipo: u.tipo === 'kitnet' ? 'kitnet' : 'quarto', nome: str(u.nome, 40), andar: str(u.andar, 40), valor: num(u.valor), obs: str(u.obs, 2000), itens };
+  return { id, tipo: u.tipo === 'kitnet' ? 'kitnet' : 'quarto', nome: str(u.nome, 40), andar: str(u.andar, 40), valor: num(u.valor), comissao: u.tipo === 'kitnet' ? 0 : num(u.comissao), obs: str(u.obs, 2000), itens };
 }
 function limparCob(c) {
   if (!c || typeof c !== 'object') return null;
@@ -62,7 +77,16 @@ function limparContrato(c) {
   if (!c || typeof c !== 'object') return null;
   const id = safeId(c.id); if (!id) return null;
   const st = ['rascunho', 'enviado', 'assinado', 'encerrado'].includes(c.status) ? c.status : 'rascunho';
-  return { id, pessoaId: safeId(c.pessoaId), unidadeId: safeId(c.unidadeId), status: st, geradoEm: isoDate(c.geradoEm), enviadoEm: isoDate(c.enviadoEm), assinadoEm: isoDate(c.assinadoEm), assinadoPor: str(c.assinadoPor, 80) };
+  return { id, pessoaId: safeId(c.pessoaId), unidadeId: safeId(c.unidadeId), status: st, geradoEm: isoDate(c.geradoEm), enviadoEm: isoDate(c.enviadoEm), assinadoEm: isoDate(c.assinadoEm), assinadoPor: str(c.assinadoPor, 80), anexoId: safeId(c.anexoId), anexoNome: str(c.anexoNome, 180) };
+}
+function limparComissao(c) {
+  if (!c || typeof c !== 'object') return null;
+  const id = safeId(c.id); if (!id) return null;
+  return { id, unidadeId: safeId(c.unidadeId), competencia: isoMes(c.competencia), valor: num(c.valor), vencimento: isoDate(c.vencimento), pago: !!c.pago, dataPgto: isoDate(c.dataPgto), obs: str(c.obs, 200) };
+}
+function limparConfig(c) {
+  const x = c && typeof c === 'object' ? c : {};
+  return { comissaoObs: !!x.comissaoObs, regras: str(x.regras, 20000) || REGRAS_PADRAO, regrasArq: str(x.regrasArq, 180) };
 }
 function normalizeDb(d) {
   if (!d || typeof d !== 'object') return vazio();
@@ -71,7 +95,9 @@ function normalizeDb(d) {
     pessoas: arr(d.pessoas).map(limparPessoa).filter(Boolean),
     cobrancas: arr(d.cobrancas).map(limparCob).filter(Boolean),
     despesas: arr(d.despesas).map(limparDesp).filter(Boolean),
-    contratos: arr(d.contratos).map(limparContrato).filter(Boolean)
+    contratos: arr(d.contratos).map(limparContrato).filter(Boolean),
+    comissoes: arr(d.comissoes).map(limparComissao).filter(Boolean),
+    config: limparConfig(d.config)
   };
 }
 function load() {
@@ -122,6 +148,7 @@ const IC = {
   check: '<path d="M5 12.5l4.5 4.5L19 7"/>',
   file: '<path d="M6 2.5h8l4 4V21.5H6z"/><path d="M14 2.5V7h4"/>',
   clip: '<path d="M20 11.5l-8 8a5 5 0 01-7-7l8.5-8.5a3.3 3.3 0 014.7 4.7L9.5 17.2a1.7 1.7 0 01-2.4-2.4L14.5 7.5"/>',
+  list: '<path d="M8 6h12M8 12h12M8 18h12"/><circle cx="4" cy="6" r="1.2"/><circle cx="4" cy="12" r="1.2"/><circle cx="4" cy="18" r="1.2"/>',
 };
 const ic = (n, s = 16) => `<svg class="ic" width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IC[n]}</svg>`;
 
@@ -223,108 +250,3 @@ async function exigirPin() {
 $('#btn-lock').onclick = () => { limparSessao(); exigirPin(); };
 ['click', 'keydown', 'pointerdown'].forEach(ev => document.addEventListener(ev, () => { if (sessaoOk()) resetIdle(); }, { passive: true }));
 
-// ---------- Arquivos anexados (IndexedDB; metadados ficam no cadastro da pessoa) ----------
-let _idb;
-const idb = () => _idb || (_idb = new Promise((res, rej) => {
-  const r = indexedDB.open('painel-condominio-arquivos', 1);
-  r.onupgradeneeded = () => r.result.createObjectStore('f');
-  r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
-}));
-const idbOp = (mode, fn) => idb().then(d => new Promise((res, rej) => {
-  const t = d.transaction('f', mode), rq = fn(t.objectStore('f'));
-  t.oncomplete = () => res(rq && rq.result); t.onerror = () => rej(t.error); t.onabort = () => rej(t.error);
-}));
-const arqPut = (id, blob) => idbOp('readwrite', s => s.put(blob, id));
-const arqGet = id => idbOp('readonly', s => s.get(id));
-const arqDel = id => idbOp('readwrite', s => s.delete(id)).catch(() => {});
-const arqClear = () => idbOp('readwrite', s => s.clear()).catch(() => {});
-
-const CAT = { rg: 'RG / CNH', cpf: 'CPF', passaporte: 'Passaporte', crnm: 'CRNM / RNM (ou protocolo)', visto: 'Visto / comprovante migratório',
-  residencia: 'Comprovante de residência', contrato: 'Contrato assinado', foto: 'Foto', outro: 'Outro' };
-const DOCS_OBRIG = { BR: ['rg', 'cpf', 'contrato'], EX: ['passaporte', 'crnm', 'visto', 'contrato'] }; // documentos esperados por tipo
-const MAX_ARQ = 10 * 1024 * 1024;
-const fmtTam = n => n >= 1048576 ? (n / 1048576).toFixed(1).replace('.', ',') + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
-const docsFaltando = p => (DOCS_OBRIG[p.tipo] || []).filter(c => !(p.arquivos || []).some(a => a.categoria === c));
-function docsBadge(p) {
-  const n = (DOCS_OBRIG[p.tipo] || []).length, f = docsFaltando(p);
-  const tip = f.length ? 'Faltam: ' + f.map(c => CAT[c]).join(', ') : 'Documentação completa';
-  return `<span class="badge ${f.length ? 'warn' : 'ok'}" title="${esc(tip)}">${n - f.length}/${n}</span> <span class="k">${(p.arquivos || []).length} arq.</span>`;
-}
-async function magiaArq(f) {
-  const b = new Uint8Array(await f.slice(0, 12).arrayBuffer());
-  const pdf = b[0] === 0x25 && b[1] === 0x50 && b[2] === 0x44 && b[3] === 0x46;
-  const png = b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4E && b[3] === 0x47;
-  const jpg = b[0] === 0xFF && b[1] === 0xD8;
-  const gif = b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46;
-  const webp = b[0] === 0x52 && b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50;
-  if (pdf) return 'application/pdf';
-  if (png || jpg || gif || webp) return f.type.startsWith('image/') ? f.type : 'image/jpeg';
-  return '';
-}
-async function verArquivo(a, novo) {
-  let blob = novo;
-  if (!blob) { try { blob = await arqGet(a.id); } catch (e) { /* ignora */ } }
-  if (!blob) return toast('Arquivo não encontrado neste navegador (anexos não entram no backup).');
-  const url = URL.createObjectURL(blob), d = $('#previa');
-  $('#previa-t').textContent = a.nome;
-  const img = (blob.type || '').startsWith('image/');
-  $('#previa-c').innerHTML = img
-    ? `<img src="${url}" alt="${esc(a.nome)}">`
-    : `<iframe src="${url}" title="${esc(a.nome)}" sandbox></iframe>`;
-  d.onclose = () => { URL.revokeObjectURL(url); $('#previa-c').innerHTML = ''; };
-  d.showModal();
-}
-
-// ---------- Consultas ----------
-const AVISO_VISTO = 60, AVISO_CONTRATO = 30; // dias de antecedência do aviso
-const diasAte = s => Math.round((new Date(s + 'T12:00') - new Date(today() + 'T12:00')) / 864e5);
-const pessoa = id => db.pessoas.find(p => p.id === id);
-const unidade = id => db.unidades.find(u => u.id === id);
-const ativo = p => !p.dataSaida || p.dataSaida >= today();
-const intervaloMes = comp => { const [y, m] = comp.split('-').map(Number); return { ini: `${comp}-01`, fim: `${comp}-${pad(daysIn(y, m))}` }; };
-const ativoEm = (p, ini, fim) => !!(p.dataEntrada && p.dataEntrada <= fim && (!p.dataSaida || p.dataSaida >= ini));
-const moradores = uId => db.pessoas.filter(p => p.unidadeId === uId && ativo(p));
-const moradoresEm = (uId, ini, fim) => db.pessoas.filter(p => p.unidadeId === uId && ativoEm(p, ini, fim));
-const valorAluguel = p => +p.valor || +(unidade(p.unidadeId)?.valor) || 0;
-const statusCob = c => c.pago ? 'pago' : (c.vencimento < today() ? 'atrasado' : 'pendente');
-const rotuloUnidade = id => { const u = unidade(id); return u ? `${u.tipo === 'kitnet' ? 'Kitnet' : 'Quarto'} ${u.nome}` : '—'; };
-function maskCpf(v) {
-  const d = String(v || '').replace(/\D/g, '');
-  return d.length >= 2 ? `***.***.***-${d.slice(-2)}` : '***';
-}
-function docPessoa(p) {
-  if (p.tipo === 'BR') return 'CPF ' + (isObs() ? maskCpf(p.cpf) : esc(p.cpf || '—'));
-  if (isObs()) return p.passaporte ? 'Pass. ••••' + esc(String(p.passaporte).slice(-3)) : 'Doc. oculto';
-  return p.passaporte ? 'Pass. ' + esc(p.passaporte) : 'CRNM ' + esc(p.crnm || '—');
-}
-
-// ---------- Modal ----------
-const modal = $('#modal'), mform = $('#modal-form');
-function abrirModal(html, onSubmit) {
-  mform.innerHTML = html;
-  mform.onsubmit = e => {
-    e.preventDefault();
-    if (e.submitter && e.submitter.value === 'cancel') { modal.close(); return; }
-    const fd = Object.fromEntries(new FormData(mform).entries());
-    Promise.resolve(onSubmit(fd, mform)).then(r => { if (r !== false) modal.close(); });
-  };
-  $$('[data-cancel]', mform).forEach(b => b.onclick = () => modal.close());
-  modal.showModal();
-}
-// Avisos dentro do diálogo (alert/confirm nativos não funcionam em todos os ambientes)
-function erro(msg) {
-  let e = $('.form-erro', mform);
-  if (!e) { e = document.createElement('div'); e.className = 'form-erro'; mform.prepend(e); }
-  e.textContent = msg; e.scrollIntoView({ block: 'nearest' });
-}
-function confirmar(msg) {
-  return new Promise(res => {
-    const d = $('#confirmar'); $('#conf-msg').textContent = msg; d.returnValue = '';
-    d.onclose = () => res(d.returnValue === 'yes'); d.showModal();
-  });
-}
-const campo = (label, name, val = '', extra = '', cls = '') =>
-  `<div class="${cls}"><label>${label}</label><input name="${name}" value="${esc(val)}" ${extra}></div>`;
-const botoes = () => `<div class="modal-actions full" style="grid-column:1/-1"><button type="button" data-cancel>Cancelar</button><button class="primary">Salvar</button></div>`;
-
-// ---------- Avisos de visto / contrato ----------
