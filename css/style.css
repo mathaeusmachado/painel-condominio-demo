@@ -212,8 +212,13 @@ body:has(#demo-bar:not([hidden])) .topbar{top:0}
 body:has(#demo-bar) #btn-lock{display:none!important}
 .ctr-txt{white-space:pre-wrap;font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--surface-2);padding:1rem 1.1rem;border-radius:14px;max-height:42vh;overflow:auto;margin:.4rem 0 0}
 body.papel-obs .so-dono{display:none!important}
-body.papel-obs #tabs [data-tab="financeiro"],
-body.papel-obs #tab-financeiro{display:none!important}
+body.papel-obs:not(.comissao-obs) #tabs [data-tab="financeiro"],
+body.papel-obs:not(.comissao-obs) #tab-financeiro{display:none!important}
+body.papel-obs.comissao-obs .fin-so-dono{display:none!important}
+body.papel-obs.comissao-obs #tab-financeiro h2,
+body.papel-obs.comissao-obs #tab-financeiro .row.between.wrap:first-child{display:none}
+#tb-comissao-valores,#tb-comissoes{min-width:28rem}
+#regras-txt{max-height:none}
 .demo-short,.papel-short{display:none}
 @media(max-width:720px){
   .topbar{backdrop-filter:none;-webkit-backdrop-filter:none;transform:none;filter:none}
