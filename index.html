@@ -24,6 +24,7 @@
     <button data-tab="pessoas"><svg class="ic" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.6-3.6 3.2-5.5 6.5-5.5s5.9 1.9 6.5 5.5"/><path d="M16 4.7a3.5 3.5 0 010 6.6M18 14.8c2 .6 3.2 2.3 3.5 5.2"/></svg> Pessoas</button>
     <button data-tab="unidades"><svg class="ic" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 19V5M3 15h18v4M21 15v-3a3 3 0 00-3-3h-7v6"/><circle cx="7" cy="11" r="1.7"/></svg> Unidades</button>
     <button data-tab="contratos"><svg class="ic" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v5h5M8 13h8M8 17h5"/></svg> Contratos</button>
+    <button data-tab="regras"><svg class="ic" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4h10v16H7z"/><path d="M10 8h4M10 12h4M10 16h3"/></svg> Regras</button>
   </nav>
   <div class="tools so-dono">
     <button id="btn-lock" class="ghost" title="Bloquear painel" hidden>Bloquear</button>
@@ -32,6 +33,7 @@
   </div>
 </header>
 <div id="alertas"></div>
+
 <main>
   <section id="tab-financeiro" class="tab active">
     <div class="row between wrap">
@@ -42,20 +44,38 @@
         <button id="btn-nova-despesa" class="so-dono">+ Despesa</button>
       </div>
     </div>
-    <div id="fin-cards" class="cards"></div>
-    <div class="grid2">
+    <div id="fin-cards" class="cards fin-so-dono"></div>
+    <div class="grid2 fin-so-dono">
       <div class="panel"><h3>Recebido x despesas · 6 meses</h3><div id="fin-chart"></div></div>
       <div class="panel"><h3>Ocupação</h3><div id="fin-ocupacao"></div></div>
     </div>
-    <div class="panel">
+    <div class="panel fin-so-dono">
       <h3>Cobranças do mês</h3>
       <div class="table-wrap"><table id="tb-cobrancas"></table></div>
     </div>
-    <div class="panel">
+    <div class="panel fin-so-dono">
       <h3>Despesas do mês</h3>
       <div class="table-wrap"><table id="tb-despesas"></table></div>
     </div>
+    <div class="panel" id="painel-comissao">
+      <div class="row between wrap">
+        <div>
+          <h3 style="margin:0">Comissão Geovani · quartos</h3>
+          <p class="k" style="margin:.35rem 0 0;max-width:38rem">Valor em reais por quarto, não percentual. Só o dono edita. O observador vê esta lista se o dono permitir.</p>
+        </div>
+        <label class="so-dono" style="display:flex;align-items:center;gap:.45rem;font-size:.9rem">
+          <input type="checkbox" id="chk-comissao-obs"> Mostrar para o observador
+        </label>
+      </div>
+      <div class="table-wrap" style="margin-top:.9rem"><table id="tb-comissao-valores"></table></div>
+      <div class="row between wrap" style="margin:1.1rem 0 .5rem">
+        <h3 style="margin:0">Lançamentos do mês</h3>
+        <button type="button" id="btn-gerar-comissao" class="primary so-dono">Gerar comissões do mês</button>
+      </div>
+      <div class="table-wrap"><table id="tb-comissoes"></table></div>
+    </div>
   </section>
+
   <section id="tab-calendario" class="tab">
     <div class="row between wrap">
       <h2>Calendário</h2>
@@ -80,6 +100,7 @@
       <div class="panel"><h3 id="cal-dia-titulo">Selecione um dia</h3><div id="cal-dia"></div></div>
     </div>
   </section>
+
   <section id="tab-pessoas" class="tab">
     <div class="row between wrap">
       <h2>Pessoas</h2>
@@ -97,6 +118,7 @@
     </div>
     <div class="table-wrap"><table id="tb-pessoas"></table></div>
   </section>
+
   <section id="tab-unidades" class="tab">
     <div class="row between wrap">
       <h2>Quartos e Kitnets</h2>
@@ -113,10 +135,11 @@
     </div>
     <div id="uni-lista" class="cards units"></div>
   </section>
+
   <section id="tab-contratos" class="tab">
     <div class="row between wrap">
       <h2>Contratos</h2>
-      <p class="k" style="margin:0;max-width:36rem">Um responsável por unidade. O modelo é o mesmo para todos; o inquilino lê e assina no painel. Baixar só se precisar.</p>
+      <p class="k" style="margin:0;max-width:36rem">Modelo de locação de 1 ano. Os dados do cadastro preenchem o documento; baixe em PDF ou Word para assinar e anexe o arquivo de volta no cadastro.</p>
     </div>
     <div id="ctr-resumo"></div>
     <div class="panel">
@@ -124,17 +147,44 @@
       <div class="table-wrap"><table id="tb-contratos"></table></div>
     </div>
   </section>
+
+  <section id="tab-regras" class="tab">
+    <div class="row between wrap">
+      <h2>Regras de convivência</h2>
+      <div class="row gap">
+        <button type="button" id="btn-regras-pdf">Baixar PDF</button>
+        <button type="button" id="btn-regras-word">Baixar Word</button>
+      </div>
+    </div>
+    <p class="k" style="max-width:40rem">Dono e observador veem esta aba. Envio por WhatsApp ou e-mail fica para depois; por enquanto só o download. O texto abaixo é provisório até o arquivo definitivo.</p>
+    <div class="panel">
+      <div id="regras-txt" class="ctr-txt"></div>
+      <div class="so-dono" style="margin-top:1rem">
+        <label for="regras-edit">Editar texto (dono)</label>
+        <textarea id="regras-edit" rows="10" style="width:100%;margin:.4rem 0 0"></textarea>
+        <div class="row gap" style="margin-top:.7rem">
+          <button type="button" id="btn-regras-salvar" class="primary">Salvar regras</button>
+          <label class="btn">Substituir por arquivo<input type="file" id="file-regras" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden></label>
+        </div>
+        <p class="k" id="regras-arq-nome" style="margin:.6rem 0 0"></p>
+      </div>
+    </div>
+  </section>
 </main>
+
 <dialog id="modal"><form method="dialog" id="modal-form"></form></dialog>
 <dialog id="confirmar"><form method="dialog"><p id="conf-msg"></p>
   <div class="modal-actions"><button value="no">Cancelar</button><button value="yes" class="primary">Confirmar</button></div></form></dialog>
 <dialog id="previa"><form method="dialog"><h3 id="previa-t"></h3><div id="previa-c"></div>
   <div class="modal-actions"><button class="primary">Fechar</button></div></form></dialog>
 <div id="toast" popover="manual" role="status"></div>
+
 <script src="js/demo.js"></script>
 <script src="js/app-1.js"></script>
 <script src="js/app-2.js"></script>
 <script src="js/app-3.js"></script>
 <script src="js/app-4.js"></script>
+<script src="js/app-5.js"></script>
+<script src="js/app-6.js"></script>
 </body>
 </html>
