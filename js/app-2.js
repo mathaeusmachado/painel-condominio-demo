@@ -1,3 +1,119 @@
+// ---------- Arquivos anexados (IndexedDB; metadados ficam no cadastro da pessoa) ----------
+let _idb;
+const idb = () => _idb || (_idb = new Promise((res, rej) => {
+  const r = indexedDB.open('painel-condominio-arquivos', 1);
+  r.onupgradeneeded = () => r.result.createObjectStore('f');
+  r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+}));
+const idbOp = (mode, fn) => idb().then(d => new Promise((res, rej) => {
+  const t = d.transaction('f', mode), rq = fn(t.objectStore('f'));
+  t.oncomplete = () => res(rq && rq.result); t.onerror = () => rej(t.error); t.onabort = () => rej(t.error);
+}));
+const arqPut = (id, blob) => idbOp('readwrite', s => s.put(blob, id));
+const arqGet = id => idbOp('readonly', s => s.get(id));
+const arqDel = id => idbOp('readwrite', s => s.delete(id)).catch(() => {});
+const arqClear = () => idbOp('readwrite', s => s.clear()).catch(() => {});
+
+const CAT = { rg: 'RG / CNH', cpf: 'CPF', passaporte: 'Passaporte', crnm: 'CRNM / RNM (ou protocolo)', visto: 'Visto / comprovante migratório',
+  residencia: 'Comprovante de residência', contrato: 'Contrato assinado', foto: 'Foto', outro: 'Outro' };
+const DOCS_OBRIG = { BR: ['rg', 'cpf', 'contrato'], EX: ['passaporte', 'crnm', 'visto', 'contrato'] }; // documentos esperados por tipo
+const MAX_ARQ = 10 * 1024 * 1024;
+const fmtTam = n => n >= 1048576 ? (n / 1048576).toFixed(1).replace('.', ',') + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
+const docsFaltando = p => (DOCS_OBRIG[p.tipo] || []).filter(c => !(p.arquivos || []).some(a => a.categoria === c));
+function docsBadge(p) {
+  const n = (DOCS_OBRIG[p.tipo] || []).length, f = docsFaltando(p);
+  const tip = f.length ? 'Faltam: ' + f.map(c => CAT[c]).join(', ') : 'Documentação completa';
+  return `<span class="badge ${f.length ? 'warn' : 'ok'}" title="${esc(tip)}">${n - f.length}/${n}</span> <span class="k">${(p.arquivos || []).length} arq.</span>`;
+}
+async function magiaArq(f) {
+  const b = new Uint8Array(await f.slice(0, 12).arrayBuffer());
+  const pdf = b[0] === 0x25 && b[1] === 0x50 && b[2] === 0x44 && b[3] === 0x46;
+  const png = b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4E && b[3] === 0x47;
+  const jpg = b[0] === 0xFF && b[1] === 0xD8;
+  const gif = b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46;
+  const webp = b[0] === 0x52 && b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50;
+  if (pdf) return 'application/pdf';
+  if (png || jpg || gif || webp) return f.type.startsWith('image/') ? f.type : 'image/jpeg';
+  if (b[0] === 0x50 && b[1] === 0x4B) return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+  if (/\.docx?$/i.test(f.name)) return f.type || 'application/msword';
+  return '';
+}
+async function verArquivo(a, novo) {
+  let blob = novo;
+  if (!blob) { try { blob = await arqGet(a.id); } catch (e) { /* ignora */ } }
+  if (!blob) return toast('Arquivo não encontrado neste navegador (anexos não entram no backup).');
+  const url = URL.createObjectURL(blob), d = $('#previa');
+  $('#previa-t').textContent = a.nome;
+  const img = (blob.type || '').startsWith('image/');
+  $('#previa-c').innerHTML = img
+    ? `<img src="${url}" alt="${esc(a.nome)}">`
+    : `<iframe src="${url}" title="${esc(a.nome)}" sandbox></iframe>`;
+  d.onclose = () => { URL.revokeObjectURL(url); $('#previa-c').innerHTML = ''; };
+  d.showModal();
+}
+
+// ---------- Consultas ----------
+const AVISO_VISTO = 60, AVISO_CONTRATO = 30; // dias de antecedência do aviso
+const diasAte = s => Math.round((new Date(s + 'T12:00') - new Date(today() + 'T12:00')) / 864e5);
+const pessoa = id => db.pessoas.find(p => p.id === id);
+const unidade = id => db.unidades.find(u => u.id === id);
+const ativo = p => !p.dataSaida || p.dataSaida >= today();
+const intervaloMes = comp => { const [y, m] = comp.split('-').map(Number); return { ini: `${comp}-01`, fim: `${comp}-${pad(daysIn(y, m))}` }; };
+const ativoEm = (p, ini, fim) => !!(p.dataEntrada && p.dataEntrada <= fim && (!p.dataSaida || p.dataSaida >= ini));
+const moradores = uId => db.pessoas.filter(p => p.unidadeId === uId && ativo(p));
+const moradoresEm = (uId, ini, fim) => db.pessoas.filter(p => p.unidadeId === uId && ativoEm(p, ini, fim));
+const valorAluguel = p => +p.valor || +(unidade(p.unidadeId)?.valor) || 0;
+const statusCob = c => c.pago ? 'pago' : (c.vencimento < today() ? 'atrasado' : 'pendente');
+const rotuloUnidade = id => { const u = unidade(id); return u ? `${u.tipo === 'kitnet' ? 'Kitnet' : 'Quarto'} ${u.nome}` : '—'; };
+const quartos = () => db.unidades.filter(u => u.tipo === 'quarto');
+const comissaoVisivelObs = () => !!(db.config && db.config.comissaoObs);
+function addAno(iso) {
+  if (!isoDate(iso)) return '';
+  const [y, m, d] = iso.split('-').map(Number);
+  const dt = new Date(y + 1, m - 1, d);
+  if (dt.getMonth() !== m - 1) dt.setDate(0);
+  return ymd(dt);
+}
+function maskCpf(v) {
+  const d = String(v || '').replace(/\D/g, '');
+  return d.length >= 2 ? `***.***.***-${d.slice(-2)}` : '***';
+}
+function docPessoa(p) {
+  if (p.tipo === 'BR') return 'CPF ' + (isObs() ? maskCpf(p.cpf) : esc(p.cpf || '—'));
+  if (isObs()) return p.passaporte ? 'Pass. ••••' + esc(String(p.passaporte).slice(-3)) : 'Doc. oculto';
+  return p.passaporte ? 'Pass. ' + esc(p.passaporte) : 'CRNM ' + esc(p.crnm || '—');
+}
+
+// ---------- Modal ----------
+const modal = $('#modal'), mform = $('#modal-form');
+function abrirModal(html, onSubmit) {
+  mform.innerHTML = html;
+  mform.onsubmit = e => {
+    e.preventDefault();
+    if (e.submitter && e.submitter.value === 'cancel') { modal.close(); return; }
+    const fd = Object.fromEntries(new FormData(mform).entries());
+    Promise.resolve(onSubmit(fd, mform)).then(r => { if (r !== false) modal.close(); });
+  };
+  $$('[data-cancel]', mform).forEach(b => b.onclick = () => modal.close());
+  modal.showModal();
+}
+// Avisos dentro do diálogo (alert/confirm nativos não funcionam em todos os ambientes)
+function erro(msg) {
+  let e = $('.form-erro', mform);
+  if (!e) { e = document.createElement('div'); e.className = 'form-erro'; mform.prepend(e); }
+  e.textContent = msg; e.scrollIntoView({ block: 'nearest' });
+}
+function confirmar(msg) {
+  return new Promise(res => {
+    const d = $('#confirmar'); $('#conf-msg').textContent = msg; d.returnValue = '';
+    d.onclose = () => res(d.returnValue === 'yes'); d.showModal();
+  });
+}
+const campo = (label, name, val = '', extra = '', cls = '') =>
+  `<div class="${cls}"><label>${label}</label><input name="${name}" value="${esc(val)}" ${extra}></div>`;
+const botoes = () => `<div class="modal-actions full" style="grid-column:1/-1"><button type="button" data-cancel>Cancelar</button><button class="primary">Salvar</button></div>`;
+
+// ---------- Avisos de visto / contrato ----------
 function listaAlertas() {
   const out = [];
   db.pessoas.filter(ativo).forEach(p => {
@@ -47,7 +163,7 @@ function irAba(tab) {
 }
 $('#tabs').onclick = e => {
   const b = e.target.closest('button'); if (!b) return;
-  if (isObs() && b.dataset.tab === 'financeiro') return toast('Financeiro completo só o dono vê. Use o calendário para vencimentos e cobrança.');
+  if (isObs() && b.dataset.tab === 'financeiro' && !comissaoVisivelObs()) return toast('Financeiro completo só o dono vê. A comissão do Geovani aparece aqui se o dono autorizar.');
   irAba(b.dataset.tab);
   render();
 };
@@ -62,231 +178,11 @@ window.addEventListener('resize', acomodarNav);
 acomodarNav();
 function render() {
   document.body.classList.toggle('papel-obs', isObs());
-  if (isObs() && $('#tabs .active')?.dataset.tab === 'financeiro') irAba('calendario');
+  document.body.classList.toggle('comissao-obs', comissaoVisivelObs());
+  if (isObs() && $('#tabs .active')?.dataset.tab === 'financeiro' && !comissaoVisivelObs()) irAba('calendario');
   renderAlertas();
   const t = $('#tabs .active')?.dataset.tab;
-  const fn = ({ financeiro: renderFin, calendario: renderCal, pessoas: renderPessoas, unidades: renderUnidades, contratos: renderContratos })[t];
+  const fn = ({ financeiro: renderFin, calendario: renderCal, pessoas: renderPessoas, unidades: renderUnidades, contratos: renderContratos, regras: renderRegras })[t];
   if (fn) fn();
 }
-
-// =====================================================================
-// PESSOAS
-// =====================================================================
-function prazo(data, p, lim) {
-  if (!isoDate(data)) return '—';
-  const d = diasAte(data);
-  return esc(fmtData(data)) + (ativo(p) && d <= lim ? ` <span class="badge ${d <= 7 ? 'bad' : 'warn'}">${d < 0 ? 'vencido' : d + ' d'}</span>` : '');
-}
-function renderPessoas() {
-  const q = $('#pes-busca').value.trim().toLowerCase(), f = $('#pes-filtro').value;
-  const lista = db.pessoas.filter(p => {
-    if (f === 'BR' && p.tipo !== 'BR') return false;
-    if (f === 'EX' && p.tipo !== 'EX') return false;
-    if (f === 'ativo' && !ativo(p)) return false;
-    if (f === 'inativo' && ativo(p)) return false;
-    return !q || [p.nome, p.cpf, p.rg, p.passaporte, p.crnm, p.telefone, p.email].join(' ').toLowerCase().includes(q);
-  }).sort((a, b) => a.nome.localeCompare(b.nome));
-  $('#tb-pessoas').innerHTML = lista.length ? `
-    <tr><th>Nome</th><th>Origem</th><th>Documento</th><th>Contato</th><th>Unidade</th><th>Entrada</th><th>Contrato até</th><th>Docs</th><th>Aluguel</th><th>Venc.</th><th></th></tr>
-    ${lista.map(p => `<tr>
-      <td><strong>${esc(p.nome)}</strong> ${ativo(p) ? '' : '<span class="badge">ex-morador</span>'}</td>
-      <td>${p.tipo === 'BR' ? 'Brasileiro' : esc(p.pais || 'Estrangeiro')}</td>
-      <td>${p.tipo === 'EX' && p.validadeVisto && !isObs() ? '<div class="k" style="font-size:.75rem">visto até ' + prazo(p.validadeVisto, p, AVISO_VISTO) + '</div>' : ''}${docPessoa(p)}</td>
-      <td>${esc(isObs() ? (p.telefone ? '(••) •••••-' + String(p.telefone).replace(/\D/g, '').slice(-4) : '') : (p.telefone || ''))}</td>
-      <td>${esc(rotuloUnidade(p.unidadeId))}</td>
-      <td>${fmtData(p.dataEntrada)}</td>
-      <td>${prazo(p.dataFimContrato, p, AVISO_CONTRATO)}</td>
-      <td>${docsBadge(p)}</td>
-      <td>${p.valor ? brl(p.valor) : '—'}${p.caucao ? `<div class="k">caução ${brl(p.caucao)}${p.caucaoStatus ? ' · ' + esc(p.caucaoStatus) : ''}</div>` : ''}</td>
-      <td>${p.diaVenc ? 'dia ' + p.diaVenc : '—'}</td>
-      <td class="actions">${isObs() ? '' : `${ativo(p) ? `<button class="small" data-saida="${esc(p.id)}">Saída</button> ` : ''}<button class="small" data-ed="${esc(p.id)}">Editar</button> <button class="small danger" data-del="${esc(p.id)}">Excluir</button>`}</td>
-    </tr>`).join('')}` : '<tr><td class="empty">Nenhuma pessoa cadastrada.</td></tr>';
-}
-$('#pes-busca').oninput = $('#pes-filtro').onchange = renderPessoas;
-$('#btn-nova-pessoa').onclick = () => { if (!isObs()) formPessoa(); };
-$('#tb-pessoas').onclick = async e => {
-  if (isObs()) return;
-  const ed = e.target.closest('[data-ed]'), del = e.target.closest('[data-del]'), sai = e.target.closest('[data-saida]');
-  if (sai) { const p = pessoa(sai.dataset.saida); if (p) registrarSaida(p); return; }
-  if (ed) { const p = pessoa(ed.dataset.ed); if (p) formPessoa(p); return; }
-  if (del) {
-    const p = pessoa(del.dataset.del); if (!p) return;
-    if (ativo(p) && await confirmar('Registrar saída (mantém o histórico de cobranças) em vez de apagar o cadastro?')) {
-      registrarSaida(p); return;
-    }
-    if (!(await confirmar('Apagar o cadastro e as cobranças desta pessoa? Isso some do financeiro.'))) return;
-    (p.arquivos || []).forEach(x => arqDel(x.id));
-    db.cobrancas.forEach(c => { if (c.pessoaId === p.id) c.nome = c.nome || p.nome; });
-    db.pessoas = db.pessoas.filter(x => x.id !== p.id);
-    db.cobrancas = db.cobrancas.filter(c => c.pessoaId !== p.id);
-    save(); render(); toast('Pessoa excluída');
-  }
-};
-function registrarSaida(p) {
-  abrirModal(`<h3>Registrar saída</h3><div class="form">
-    <p class="k full" style="color:var(--muted)">${esc(p.nome)} · ${esc(rotuloUnidade(p.unidadeId))}</p>
-    ${campo('Data de saída', 'dataSaida', p.dataSaida || today(), 'type="date" required')}
-    ${p.caucao ? `<div><label>Caução (${brl(p.caucao)})</label>
-      <select name="caucaoStatus"><option value="devolvida">Devolvida</option><option value="parcial">Parcial</option><option value="retida">Retida</option></select></div>
-      ${campo('Valor devolvido (R$)', 'caucaoDevolvidaValor', p.caucao, 'type="number" step="0.01" min="0"')}` : ''}
-    ${botoes()}</div>`, async fd => {
-    p.dataSaida = fd.dataSaida;
-    if (p.caucao) {
-      p.caucaoStatus = fd.caucaoStatus || 'devolvida';
-      p.caucaoDevolvidaEm = fd.dataSaida;
-      p.caucaoDevolvidaValor = fd.caucaoStatus === 'retida' ? 0 : (fd.caucaoStatus === 'parcial' ? +fd.caucaoDevolvidaValor || 0 : p.caucao);
-    }
-    save(); render(); toast('Saída registrada');
-  });
-}
-
-function formPessoa(p = {}) {
-  let arq = [...(p.arquivos || [])];
-  const novos = new Map(); // id -> File ainda não gravado
-  const novo = !p.id;
-  const tipo = p.tipo || 'BR';
-  const opts = db.unidades.map(u => `<option value="${esc(u.id)}" ${u.id === p.unidadeId ? 'selected' : ''} data-valor="${esc(u.valor || '')}">${esc(rotuloUnidade(u.id))}${moradores(u.id).some(m => m.id !== p.id) ? ' (ocupado)' : ''}</option>`).join('');
-  abrirModal(`
-    <h3>${novo ? 'Cadastrar pessoa' : 'Editar pessoa'}</h3>
-    <div class="form">
-      <div><label>Nacionalidade</label>
-        <select name="tipo" id="f-tipo"><option value="BR" ${tipo === 'BR' ? 'selected' : ''}>Brasileiro(a)</option><option value="EX" ${tipo === 'EX' ? 'selected' : ''}>Estrangeiro(a)</option></select></div>
-      ${campo('Nome completo *', 'nome', p.nome, 'required')}
-      ${campo('Data de nascimento', 'nascimento', p.nascimento, 'type="date"')}
-      ${campo('Telefone / WhatsApp', 'telefone', p.telefone)}
-      ${campo('E-mail', 'email', p.email, 'type="email"')}
-      ${campo('Profissão / ocupação', 'profissao', p.profissao)}
-      <fieldset id="f-br"><legend>Documentos (brasileiro)</legend><div class="form">
-        ${campo('CPF *', 'cpf', p.cpf, 'placeholder="000.000.000-00"')}
-        ${campo('RG', 'rg', p.rg)}
-      </div></fieldset>
-      <fieldset id="f-ex"><legend>Documentos (estrangeiro)</legend><div class="form">
-        ${campo('País de origem *', 'pais', p.pais)}
-        ${campo('Passaporte *', 'passaporte', p.passaporte)}
-        ${campo('CRNM / RNM (se tiver)', 'crnm', p.crnm)}
-        ${campo('CPF (se tiver)', 'cpfEx', p.cpf)}
-        ${campo('Tipo de visto / situação migratória', 'visto', p.visto)}
-        ${campo('Validade do visto/documento', 'validadeVisto', p.validadeVisto, 'type="date"')}
-      </div></fieldset>
-      <fieldset><legend>Contato de emergência</legend><div class="form">
-        ${campo('Nome', 'emergNome', p.emergNome)}
-        ${campo('Telefone', 'emergTel', p.emergTel)}
-      </div></fieldset>
-      <fieldset><legend>Locação</legend><div class="form">
-        <div><label>Quarto / Kitnet</label><select name="unidadeId" id="f-unid"><option value="">— nenhum —</option>${opts}</select></div>
-        ${campo('Data de entrada', 'dataEntrada', p.dataEntrada || (novo ? today() : ''), 'type="date"')}
-        ${campo('Valor do aluguel (R$)', 'valor', p.valor, 'type="number" step="0.01" min="0"')}
-        ${campo('Dia de vencimento (1-31)', 'diaVenc', p.diaVenc || 5, 'type="number" min="1" max="31"')}
-        ${campo('Caução / depósito (R$)', 'caucao', p.caucao, 'type="number" step="0.01" min="0"')}
-        ${campo('Fim do contrato', 'dataFimContrato', p.dataFimContrato, 'type="date"')}
-        ${campo('Data de saída (se já saiu / prevista)', 'dataSaida', p.dataSaida, 'type="date"')}
-      </div></fieldset>
-      <fieldset><legend>Documentos e arquivos anexados</legend>
-        <div id="docs-check" class="chips"></div>
-        <div class="form">
-          <div><label>Tipo do documento</label><select id="doc-cat">${Object.entries(CAT).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></div>
-          <div><label>Arquivo (PDF ou imagem, até 10 MB)</label><input type="file" id="doc-file" accept="image/*,application/pdf" multiple></div>
-        </div>
-        <div id="docs-lista"></div>
-      </fieldset>
-      <div class="full"><label>Observações</label><textarea name="obs" rows="2">${esc(p.obs)}</textarea></div>
-      ${botoes()}
-    </div>`, async fd => {
-    const br = fd.tipo === 'BR';
-    if (br && fd.cpf && !validaCPF(fd.cpf)) { erro('CPF inválido.'); return false; }
-    if (br && !fd.cpf) { erro('Informe o CPF.'); return false; }
-    if (!br && !fd.passaporte && !fd.crnm) { erro('Informe passaporte ou CRNM.'); return false; }
-    if (!br && !fd.pais) { erro('Informe o país de origem.'); return false; }
-    const u = fd.unidadeId && moradores(fd.unidadeId).find(m => m.id !== p.id);
-    if (u && !(await confirmar(`${rotuloUnidade(fd.unidadeId)} já tem morador (${u.nome}). Continuar mesmo assim?`))) return false;
-    try {
-      for (const [id, f] of novos) if (arq.some(x => x.id === id)) await arqPut(id, f);
-    } catch (e) { erro('Não foi possível guardar os arquivos neste navegador.'); return false; }
-    (p.arquivos || []).filter(x => !arq.some(y => y.id === x.id)).forEach(x => arqDel(x.id));
-    const dup = db.pessoas.find(x => x.id !== p.id && br && fd.cpf && x.cpf && x.cpf.replace(/\D/g, '') === fd.cpf.replace(/\D/g, ''));
-    if (dup) { erro('Já existe cadastro com este CPF: ' + dup.nome); return false; }
-    const id = p.id || uid();
-    const reg = limparPessoa({ ...p, ...fd, arquivos: arq, id, cpf: br ? fd.cpf : fd.cpfEx, valor: +fd.valor || 0, caucao: +fd.caucao || 0, diaVenc: +fd.diaVenc || 5 });
-    if (!reg) { erro('Cadastro inválido.'); return false; }
-    delete reg.cpfEx;
-    if (br) { reg.pais = ''; reg.passaporte = ''; reg.crnm = ''; reg.visto = ''; reg.validadeVisto = ''; }
-    else reg.rg = '';
-    if (novo) db.pessoas.push(reg); else db.pessoas[db.pessoas.findIndex(x => x.id === p.id)] = reg;
-    save(); render(); toast('Pessoa salva');
-  });
-  const alterna = () => {
-    const br = $('#f-tipo').value === 'BR';
-    $('#f-br').hidden = !br; $('#f-ex').hidden = br;
-  };
-  const renderArq = () => {
-    const tipo = $('#f-tipo').value, tem = new Set(arq.map(x => x.categoria));
-    $('#docs-check').innerHTML = DOCS_OBRIG[tipo].map(c => `<span class="chip ${tem.has(c) ? 'ok' : ''}">${tem.has(c) ? ic('check', 12) : '<i class="pend"></i>'} ${CAT[c]}</span>`).join('');
-    $('#docs-lista').innerHTML = arq.length ? arq.map(x => `<div class="arq"><span class="tile">${ic('file', 16)}</span>
-      <div class="grow"><div class="nm">${esc(x.nome)}</div><div class="k">${esc(CAT[x.categoria] || 'Outro')} · ${fmtTam(x.tamanho)} · ${fmtData(x.adicionado)}</div></div>
-      <button type="button" class="small" data-ver="${x.id}">Ver</button>
-      <button type="button" class="small danger" data-rmarq="${x.id}" aria-label="Remover arquivo">${ic('x', 13)}</button></div>`).join('')
-      : '<div class="k" style="margin-top:.6rem">Nenhum arquivo anexado.</div>';
-  };
-  $('#doc-file').onchange = async e => {
-    $('.form-erro', mform)?.remove();
-    for (const f of e.target.files) {
-      if (f.size > MAX_ARQ) { erro(`“${f.name}” passa de 10 MB.`); continue; }
-      const tipo = await magiaArq(f);
-      if (!tipo) { erro(`“${f.name}” não é PDF nem imagem reconhecível.`); continue; }
-      const id = uid(); novos.set(id, f);
-      arq.push({ id, nome: f.name, tipo, tamanho: f.size, categoria: CAT_OK.has($('#doc-cat').value) ? $('#doc-cat').value : 'outro', adicionado: today() });
-    }
-    e.target.value = ''; renderArq();
-  };
-  const selUn = $('#f-unid');
-  if (selUn) selUn.onchange = () => {
-    const o = selUn.selectedOptions[0], v = mform.querySelector('[name=valor]');
-    if (o && o.dataset.valor && v && !v.value) v.value = o.dataset.valor;
-  };
-  $('#docs-lista').onclick = e => {
-    const v = e.target.closest('[data-ver]'), r = e.target.closest('[data-rmarq]');
-    if (v) { const x = arq.find(y => y.id === v.dataset.ver); verArquivo(x, novos.get(x.id)); }
-    if (r) { arq = arq.filter(y => y.id !== r.dataset.rmarq); novos.delete(r.dataset.rmarq); renderArq(); }
-  };
-  $('#f-tipo').addEventListener('change', renderArq);
-  $('#f-tipo').onchange = alterna; alterna(); renderArq();
-}
-
-// =====================================================================
-// UNIDADES (quartos / kitnets) + inventário mobiliado
-// =====================================================================
-const ESTADOS = ['Novo', 'Bom', 'Regular', 'Ruim', 'Quebrado'];
-
-function renderUnidades() {
-  const f = $('#uni-filtro').value;
-  const lista = db.unidades.filter(u => {
-    const oc = moradores(u.id).length > 0;
-    return !f || (f === 'kitnet' && u.tipo === 'kitnet') || (f === 'quarto' && u.tipo === 'quarto') || (f === 'livre' && !oc) || (f === 'ocupado' && oc);
-  }).sort((a, b) => a.nome.localeCompare(b.nome, 'pt', { numeric: true }));
-  $('#uni-lista').innerHTML = lista.length ? lista.map(u => {
-    const m = moradores(u.id);
-    return `<div class="card unit">
-      <h3><span><span class="tile">${ic(u.tipo === 'kitnet' ? 'home' : 'bed', 20)}</span>${esc(rotuloUnidade(u.id))}</span>
-        <span class="badge ${m.length ? 'ok' : 'warn'}">${m.length ? 'Ocupado' : 'Livre'}</span></h3>
-      <div class="k">${u.andar ? esc(u.andar) + ' · ' : ''}${u.valor ? brl(u.valor) + '/mês' : 'sem valor definido'}</div>
-      <div class="k">${m.length ? ic('user', 14) + ' ' + m.map(x => esc(x.nome)).join(', ') : 'Sem morador'}</div>
-      <strong class="itens-t">Mobília e itens (${(u.itens || []).length})</strong>
-      ${(u.itens || []).length ? `<ul>${u.itens.map(i => `<li>${i.qtd}× ${esc(i.nome)} <em>(${esc(i.estado)})</em></li>`).join('')}</ul>` : '<ul><li>Nenhum item listado</li></ul>'}
-      ${u.obs ? `<div class="k">${ic('note', 14)} ${esc(u.obs)}</div>` : ''}
-      ${isObs() ? '' : `<div class="foot"><button class="small" data-ed="${esc(u.id)}">Editar / itens</button><button class="small danger" data-del="${esc(u.id)}">Excluir</button></div>`}
-    </div>`;
-  }).join('') : '<div class="empty">Nenhuma unidade. Clique em “+ Nova unidade”.</div>';
-}
-$('#uni-filtro').onchange = renderUnidades;
-$('#btn-nova-unidade').onclick = () => { if (!isObs()) formUnidade(); };
-$('#uni-lista').onclick = async e => {
-  if (isObs()) return;
-  const ed = e.target.closest('[data-ed]'), del = e.target.closest('[data-del]');
-  if (ed) { const u = unidade(ed.dataset.ed); if (u) formUnidade(u); }
-  if (del) {
-    const id = del.dataset.del;
-    if (moradores(id).length) return toast('Há morador ativo nesta unidade. Mude o morador antes de excluir.');
-    if (await confirmar('Excluir esta unidade?')) { db.unidades = db.unidades.filter(u => u.id !== id); db.pessoas.forEach(p => { if (p.unidadeId === id) p.unidadeId = ''; }); save(); renderUnidades(); }
-  }
-};
 
